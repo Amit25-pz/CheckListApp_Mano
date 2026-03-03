@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 
 import pandas as pd
 from pydantic import BaseModel, Field
@@ -108,67 +109,217 @@ def get_default_items() -> list[ChecklistItem]:
 def report_to_dataframe(report: MaintenanceReport) -> pd.DataFrame:
     """Convert a MaintenanceReport to a pandas DataFrame.
 
-    The DataFrame contains one row per checklist item, followed by a
-    metadata row that records technician, hospital, machine_id, and timestamp.
+    One row per checklist item; metadata (technician, hospital, etc.)
+    appears as dedicated columns on every row.
     """
     rows = []
     for item in report.items:
         rows.append({
+            "תאריך": report.timestamp.strftime("%Y-%m-%d %H:%M"),
+            "טכנאי": report.technician,
+            "בית חולים": report.hospital,
+            "מזהה מכשיר": report.machine_id,
             "מזהה": item.id,
             "קטגוריה": item.category.value,
             "תיאור": item.description,
             "סטטוס": item.status.value,
             "הערה": item.note,
         })
-
-    df_items = pd.DataFrame(rows)
-
-    # Metadata appended as extra rows with a separator
-    meta = pd.DataFrame([
-        {
-            "מזהה": "",
-            "קטגוריה": "--- פרטי דוח ---",
-            "תיאור": "",
-            "סטטוס": "",
-            "הערה": "",
-        },
-        {
-            "מזהה": "טכנאי",
-            "קטגוריה": report.technician,
-            "תיאור": "",
-            "סטטוס": "",
-            "הערה": "",
-        },
-        {
-            "מזהה": "בית חולים",
-            "קטגוריה": report.hospital,
-            "תיאור": "",
-            "סטטוס": "",
-            "הערה": "",
-        },
-        {
-            "מזהה": "מזהה מכשיר",
-            "קטגוריה": report.machine_id,
-            "תיאור": "",
-            "סטטוס": "",
-            "הערה": "",
-        },
-        {
-            "מזהה": "תאריך ושעה",
-            "קטגוריה": report.timestamp.strftime("%Y-%m-%d %H:%M"),
-            "תיאור": "",
-            "סטטוס": "",
-            "הערה": "",
-        },
-    ])
-
-    return pd.concat([df_items, meta], ignore_index=True)
+    return pd.DataFrame(rows)
 
 
 def generate_filename(report: MaintenanceReport) -> str:
-    """Generate a timestamped filename for a maintenance report CSV."""
-    ts = report.timestamp.strftime("%Y-%m-%d_%H-%M")
-    tech = report.technician.replace(" ", "_")
-    hospital = report.hospital.replace(" ", "_")
-    machine = report.machine_id.replace(" ", "_")
-    return f"{ts}_{tech}_{hospital}_{machine}.csv"
+    """Generate a timestamped base filename (no extension) for a maintenance report.
+
+    Strips characters that are illegal in Windows file paths: \\ / : * ? " < > |
+    """
+    import re
+
+    def sanitize(text: str) -> str:
+        text = text.replace(" ", "_")
+        text = re.sub(r'[\\/:*?"<>|]', "", text)
+        return text
+
+    ts       = report.timestamp.strftime("%Y-%m-%d_%H-%M")
+    tech     = sanitize(report.technician)
+    hospital = sanitize(report.hospital)
+    machine  = sanitize(report.machine_id)
+    return f"{ts}_{tech}_{hospital}_{machine}"
+
+
+# ---------------------------------------------------------------------------
+# PDF generation
+# ---------------------------------------------------------------------------
+
+_PDF_FONTS_REGISTERED = False
+
+
+def generate_pdf_bytes(report: MaintenanceReport) -> bytes:
+    """Render a Hebrew maintenance report as PDF and return the raw bytes."""
+    import io
+
+    from bidi.algorithm import get_display
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import cm
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.platypus import (
+        Paragraph,
+        SimpleDocTemplate,
+        Spacer,
+        Table,
+        TableStyle,
+    )
+
+    global _PDF_FONTS_REGISTERED
+    font_reg  = "ArialHeb"
+    font_bold = "ArialHeb-Bold"
+
+    if not _PDF_FONTS_REGISTERED:
+        try:
+            pdfmetrics.registerFont(TTFont(font_reg,  r"C:\Windows\Fonts\arial.ttf"))
+            pdfmetrics.registerFont(TTFont(font_bold, r"C:\Windows\Fonts\arialbd.ttf"))
+            _PDF_FONTS_REGISTERED = True
+        except Exception:
+            font_reg  = "Helvetica"
+            font_bold = "Helvetica-Bold"
+
+    # Brand colours matching the company logo
+    NAVY   = colors.HexColor("#4A4F6E")
+    GOLD   = colors.HexColor("#CEC28C")
+    CREAM  = colors.HexColor("#EDE8D5")
+    LIGHT  = colors.HexColor("#F5F0E6")
+
+    def h(text: str) -> str:
+        """Apply Unicode BiDi algorithm so Hebrew renders correctly in LTR engines."""
+        return get_display(str(text))
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        rightMargin=2 * cm, leftMargin=2 * cm,
+        topMargin=1.5 * cm, bottomMargin=2 * cm,
+    )
+
+    title_style = ParagraphStyle("title", fontName=font_bold, fontSize=15,
+                                 alignment=TA_CENTER, textColor=CREAM, spaceAfter=2)
+    meta_style  = ParagraphStyle("meta",  fontName=font_reg,  fontSize=10,
+                                 alignment=TA_RIGHT, textColor=CREAM, spaceAfter=2)
+
+    story: list = []
+
+    # ── Header banner: logo (right) + title + metadata (left) ──
+    LOGO_PATH = Path(__file__).parent / "data" / "images" / "logo.jpeg"
+    if LOGO_PATH.exists():
+        from reportlab.platypus import Image as RLImage
+        logo_img = RLImage(str(LOGO_PATH), width=3 * cm, height=3 * cm)
+    else:
+        logo_img = Spacer(3 * cm, 3 * cm)
+
+    title_para = Paragraph(h("יומן תחזוקה — תא היפרברי"), title_style)
+    meta_lines = [
+        f"{h(label)}: {h(value)}" for label, value in [
+            ("טכנאי",      report.technician),
+            ("בית חולים",  report.hospital),
+            ("מזהה מכשיר", report.machine_id),
+            ("תאריך",      report.timestamp.strftime("%d/%m/%Y %H:%M")),
+        ]
+    ]
+    meta_block = Paragraph("<br/>".join(meta_lines), meta_style)
+
+    # RTL layout: logo on the right column (index 1), text on left (index 0)
+    header_table = Table(
+        [[meta_block, logo_img]],
+        colWidths=[12.5 * cm, 3.5 * cm],
+    )
+    header_table.setStyle(TableStyle([
+        ("BACKGROUND",    (0, 0), (-1, -1), NAVY),
+        ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN",         (0, 0), (0,  -1), "RIGHT"),
+        ("ALIGN",         (1, 0), (1,  -1), "CENTER"),
+        ("TOPPADDING",    (0, 0), (-1, -1), 10),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING",  (0, 0), (-1, -1), 8),
+    ]))
+    story.append(header_table)
+    story.append(Spacer(1, 0.5 * cm))
+
+    # Checklist table — columns ordered RTL (right→left reading order)
+    # Visual left-to-right in PDF:  הערה | סטטוס | תיאור | קטגוריה | #
+    # Reads right-to-left as:       #    | קטגוריה | תיאור | סטטוס | הערה
+    col_widths = [4.5 * cm, 3 * cm, 5 * cm, 3 * cm, 1 * cm]
+    header = [h(c) for c in ["הערה", "סטטוס", "תיאור", "קטגוריה", "#"]]
+    tdata  = [header]
+    for item in report.items:
+        tdata.append([
+            h(item.note) if item.note else "",
+            h(item.status.value),
+            h(item.description),
+            h(item.category.value),
+            str(item.id),
+        ])
+
+    table = Table(tdata, colWidths=col_widths, repeatRows=1)
+    ts = TableStyle([
+        ("BACKGROUND",    (0, 0), (-1,  0), NAVY),
+        ("TEXTCOLOR",     (0, 0), (-1,  0), GOLD),
+        ("FONTNAME",      (0, 0), (-1, -1), font_reg),
+        ("FONTNAME",      (0, 0), (-1,  0), font_bold),
+        ("FONTSIZE",      (0, 0), (-1, -1), 9),
+        ("ALIGN",         (0, 0), (-1, -1), "RIGHT"),
+        ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+        ("GRID",          (0, 0), (-1, -1), 0.5, colors.HexColor("#9098B8")),
+        ("TOPPADDING",    (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ])
+
+    # Alternating row background using brand light cream
+    for i in range(1, len(tdata)):
+        if i % 2 == 0:
+            ts.add("BACKGROUND", (0, i), (-1, i), LIGHT)
+
+    # Status colour on the Status column (index 1 in RTL order)
+    status_colors = {
+        Status.OK.value:     colors.HexColor("#D5F5E3"),
+        Status.FAILED.value: colors.HexColor("#FADBD8"),
+    }
+    for i, item in enumerate(report.items, start=1):
+        c = status_colors.get(item.status.value)
+        if c:
+            ts.add("BACKGROUND", (1, i), (1, i), c)
+
+    table.setStyle(ts)
+    story.append(table)
+    story.append(Spacer(1, 0.5 * cm))
+
+    # Summary table — תקין / לא תקין only
+    ok_count     = sum(1 for it in report.items if it.status == Status.OK)
+    failed_count = sum(1 for it in report.items if it.status == Status.FAILED)
+
+    sdata = [
+        [h("לא תקין"), h("תקין")],
+        [str(failed_count), str(ok_count)],
+    ]
+    stable = Table(sdata, colWidths=[8.25 * cm] * 2)
+    stable.setStyle(TableStyle([
+        ("BACKGROUND",    (0, 0), (-1,  0), NAVY),
+        ("TEXTCOLOR",     (0, 0), (-1,  0), GOLD),
+        ("BACKGROUND",    (0, 1), (0,   1), colors.HexColor("#FADBD8")),
+        ("BACKGROUND",    (1, 1), (1,   1), colors.HexColor("#D5F5E3")),
+        ("FONTNAME",      (0, 0), (-1, -1), font_reg),
+        ("FONTNAME",      (0, 0), (-1,  0), font_bold),
+        ("FONTSIZE",      (0, 0), (-1, -1), 11),
+        ("ALIGN",         (0, 0), (-1, -1), "CENTER"),
+        ("VALIGN",        (0, 0), (-1, -1), "MIDDLE"),
+        ("GRID",          (0, 0), (-1, -1), 0.5, colors.HexColor("#9098B8")),
+        ("TOPPADDING",    (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+    ]))
+    story.append(stable)
+
+    doc.build(story)
+    return buf.getvalue()
