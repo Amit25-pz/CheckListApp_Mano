@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "יומן תחזוקה היפרברי",
+    "slug": "hyperbaric-checklist",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "backgroundColor": "#4A4F6E"
+    },
+    "android": {
+      "package": "com.hyperbaric.checklist",
+      "adaptiveIcon": {
+        "backgroundColor": "#4A4F6E"
+      },
+      "permissions": [
+        "CAMERA",
+        "READ_MEDIA_IMAGES",
+        "WRITE_EXTERNAL_STORAGE",
+        "READ_EXTERNAL_STORAGE"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "האפליקציה צריכה גישה למצלמה לצילום תמונות לדוח התחזוקה"
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "האפליקציה צריכה גישה לגלריה לשמירת תמונות",
+          "savePhotosPermission": "האפליקציה צריכה הרשאה לשמירת תמונות"
+        }
+      ]
+    ]
+  }
+}
