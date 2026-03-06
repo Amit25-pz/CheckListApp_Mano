@@ -18,7 +18,15 @@
         "CAMERA",
         "READ_MEDIA_IMAGES",
         "WRITE_EXTERNAL_STORAGE",
-        "READ_EXTERNAL_STORAGE"
+        "READ_EXTERNAL_STORAGE",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_MEDIA_AUDIO"
       ]
     },
     "plugins": [
@@ -35,6 +43,12 @@
           "savePhotosPermission": "האפליקציה צריכה הרשאה לשמירת תמונות"
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "31b07b92-40d2-4d1f-8cdc-091ae9f38bb9"
+      }
+    },
+    "owner": "amitwaves"
   }
 }
