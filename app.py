@@ -36,8 +36,30 @@ st.set_page_config(
 
 PRIMARY   = "#4A4F6E"   # כחול-נייבי מהלוגו
 ACCENT    = "#CEC28C"   # זהב חם מהלוגו
-LIGHT_BG  = "#F5F0E6"   # קרם בהיר
-TEXT_DARK = "#EDE8D5"   # קרם על רקע כהה
+
+# ── ערכת צבעים לפי מצב יום/לילה (המתג בסרגל הצד) ──
+DARK_MODE = st.session_state.get("dark_mode", False)
+
+if DARK_MODE:
+    APP_BG       = "#1B1E2B"   # רקע כהה
+    TEXT_MAIN    = "#EDE8D5"   # טקסט קרם בהיר
+    HEADER_COLOR = ACCENT      # כותרות בזהב
+    SIDEBAR_BG   = "#14161F"
+    SIDEBAR_TEXT = "#EDE8D5"
+    INPUT_BG     = "#2A2E42"
+    INPUT_TEXT   = "#EDE8D5"
+    CARD_BG      = "#232738"   # רקע סעיפים
+else:
+    APP_BG       = "#F5F0E6"   # קרם בהיר
+    TEXT_MAIN    = "#000000"
+    HEADER_COLOR = PRIMARY
+    SIDEBAR_BG   = PRIMARY
+    SIDEBAR_TEXT = "#000000"
+    INPUT_BG     = "#FFFFFF"
+    INPUT_TEXT   = "#000000"
+    CARD_BG      = "#EDE8D5"
+
+TEXT_DARK = "#EDE8D5"   # קרם על רקע כהה (כפתורים)
 
 st.markdown(
     f"""
@@ -60,21 +82,35 @@ st.markdown(
             padding: 0 !important;
         }}
         [data-testid="collapsedControl"] {{ display: none !important; }}
-        section[data-testid="stSidebar"] {{ background-color: {PRIMARY}; }}
-        section[data-testid="stSidebar"] * {{ color: #000000 !important; }}
+        section[data-testid="stSidebar"] {{ background-color: {SIDEBAR_BG}; }}
+        section[data-testid="stSidebar"] * {{ color: {SIDEBAR_TEXT} !important; }}
         section[data-testid="stSidebar"] input,
         section[data-testid="stSidebar"] textarea,
         section[data-testid="stSidebar"] [data-baseweb="select"] > div,
         section[data-testid="stSidebar"] [data-baseweb="input"] {{
-            background-color: #FFFFFF !important;
-            color: #000000 !important;
+            background-color: {INPUT_BG} !important;
+            color: {INPUT_TEXT} !important;
             border-color: {ACCENT} !important;
         }}
 
         /* ── תוכן ראשי ── */
-        .main *, .block-container * {{ color: #000000; }}
-        h1, h2, h3 {{ color: {PRIMARY} !important; }}
-        .stApp {{ background-color: {LIGHT_BG}; }}
+        .main *, .block-container * {{ color: {TEXT_MAIN}; }}
+        h1, h2, h3 {{ color: {HEADER_COLOR} !important; }}
+        .stApp {{ background-color: {APP_BG}; }}
+        [data-testid="stHeader"] {{ background-color: {APP_BG} !important; }}
+
+        /* ── שדות קלט בגוף העמוד ── */
+        .block-container input,
+        .block-container textarea {{
+            background-color: {INPUT_BG} !important;
+            color: {INPUT_TEXT} !important;
+        }}
+
+        /* ── סעיפים (expanders) ── */
+        [data-testid="stExpander"] {{
+            background-color: {CARD_BG};
+            border-radius: 8px;
+        }}
 
         /* ── כפתור ראשי ── */
         div.stButton > button[kind="primary"] {{
@@ -119,6 +155,7 @@ UI_STATUSES = [Status.OK.value, Status.FAILED.value, Status.NOTE.value]
 
 with st.sidebar:
     st.title("פרטי הדוח")
+    st.toggle("🌙 מצב לילה", key="dark_mode")
     st.markdown("---")
 
     technician = st.text_input("שם הטכנאי", value="עמנואל גוטמן")
@@ -186,7 +223,9 @@ st.markdown(f"**אתר: {site_name or '—'}** · עבור על הסעיפים, 
 live_failed = 0
 live_notes = 0
 total_checks = 0
+failed_sections: list[str] = []
 for si, section in enumerate(template.sections):
+    section_has_failure = False
     for ci, check in enumerate(section.checks):
         if check.kind != "check":
             continue
@@ -194,14 +233,22 @@ for si, section in enumerate(template.sections):
         val = st.session_state.get(f"{site_key}_s{si}_c{ci}_status", Status.OK.value)
         if val == Status.FAILED.value:
             live_failed += 1
+            section_has_failure = True
         elif val == Status.NOTE.value:
             live_notes += 1
+    if section_has_failure:
+        failed_sections.append(f"{si + 1}. {section.name}")
 
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("סה\"כ בדיקות", total_checks)
 m2.metric("תקין ✅", total_checks - live_failed - live_notes)
 m3.metric("לא תקין ❌", live_failed)
 m4.metric("הערות ✱", live_notes)
+# st.empty שומר "מקום" קבוע בעץ האלמנטים גם כשאין תקלות —
+# אחרת הופעת ההתראה מזיזה את הסעיפים ו-Streamlit סוגר את כולם.
+alert_slot = st.empty()
+if failed_sections:
+    alert_slot.error("❌ סעיפים עם תקלות: " + " | ".join(failed_sections))
 st.markdown("---")
 
 # ---------------------------------------------------------------------------
@@ -209,18 +256,10 @@ st.markdown("---")
 # ---------------------------------------------------------------------------
 
 for si, section in enumerate(template.sections):
-    # אייקון סטטוס בכותרת הסעיף לפי מצב הריצה הקודמת
-    section_failed = any(
-        st.session_state.get(f"{site_key}_s{si}_c{ci}_status") == Status.FAILED.value
-        for ci, c in enumerate(section.checks) if c.kind == "check"
-    )
-    section_noted = any(
-        st.session_state.get(f"{site_key}_s{si}_c{ci}_status") == Status.NOTE.value
-        for ci, c in enumerate(section.checks) if c.kind == "check"
-    )
-    icon = "❌" if section_failed else ("✱" if section_noted else "✅")
-
-    with st.expander(f"{icon} {section.name}"):
+    # כותרת קבועה! אייקון משתנה בכותרת גורם ל-Streamlit לסגור את הסעיף
+    # בכל שינוי סטטוס (הכותרת היא ה"זהות" של ה-expander).
+    # ה-\\. מונע מ-Markdown לפרש את המספר כרשימה ממוספרת ולהעלים אותו.
+    with st.expander(f"{si + 1}\\. {section.name}"):
         check_indices = [ci for ci, c in enumerate(section.checks) if c.kind == "check"]
         st.button(
             "✔ סמן הכל תקין",
