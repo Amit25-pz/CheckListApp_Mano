@@ -7,7 +7,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 
 import { ChecklistScreen } from './src/screens/ChecklistScreen';
-import { CategoryScreen } from './src/screens/CategoryScreen';
+import { SectionScreen } from './src/screens/SectionScreen';
 import { ReportInfoScreen } from './src/screens/ReportInfoScreen';
 import { ExportScreen } from './src/screens/ExportScreen';
 import {
@@ -15,7 +15,7 @@ import {
   ChecklistStackParamList,
   RootStackParamList,
 } from './src/types';
-import { theme } from './src/theme';
+import { useColors } from './src/theme';
 import { useReport } from './src/store/useReport';
 
 // ─── Force RTL for Hebrew UI ─────────────────────────────────────────────────
@@ -34,7 +34,7 @@ function ChecklistStackNavigator() {
   return (
     <ChecklistStack.Navigator screenOptions={{ headerShown: false }}>
       <ChecklistStack.Screen name="ChecklistMain" component={ChecklistScreen} />
-      <ChecklistStack.Screen name="Category" component={CategoryScreen} />
+      <ChecklistStack.Screen name="Section" component={SectionScreen} />
     </ChecklistStack.Navigator>
   );
 }
@@ -51,15 +51,16 @@ function tabIcon(routeName: string): string {
 }
 
 function MainTabNavigator() {
+  const colors = useColors();
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
-        tabBarActiveTintColor: theme.accent,
-        tabBarInactiveTintColor: theme.textDark,
+        tabBarActiveTintColor: colors.accent,
+        tabBarInactiveTintColor: colors.textOnDark,
         tabBarStyle: {
-          backgroundColor: theme.primary,
-          borderTopColor: theme.border,
+          backgroundColor: colors.primary,
+          borderTopColor: colors.border,
         },
         tabBarLabelStyle: {
           fontSize: 12,
@@ -110,13 +111,22 @@ function RootNavigator() {
   );
 }
 
-export default function App() {
+function ThemedApp() {
+  const colors = useColors();
   return (
-    <SafeAreaProvider>
-      <StatusBar style="light" backgroundColor={theme.primary} />
+    <>
+      <StatusBar style="light" backgroundColor={colors.primary} />
       <NavigationContainer>
         <RootNavigator />
       </NavigationContainer>
+    </>
+  );
+}
+
+export default function App() {
+  return (
+    <SafeAreaProvider>
+      <ThemedApp />
     </SafeAreaProvider>
   );
 }

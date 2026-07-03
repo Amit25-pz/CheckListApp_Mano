@@ -1,48 +1,23 @@
 import { NavigatorScreenParams } from '@react-navigation/native';
 
-// ─── Domain types ──────────────────────────────────────────────────────────
+// ─── Domain types (v2 — per-site hierarchical checklists) ──────────────────
 
-export type Status = 'תקין' | 'לא תקין' | null;
+/** null = טרם נבדק (ממתין) */
+export type CheckStatus = 'תקין' | 'לא תקין' | 'הערה' | null;
 
-export type Category =
-  | 'חשמל'
-  | 'מבנה'
-  | 'בטיחות'
-  | 'מערכת גז'
-  | 'דחיסת לחץ גבוה'
-  | 'דחיסת לחץ נמוך';
-
-export const CATEGORIES: Category[] = [
-  'חשמל',
-  'מבנה',
-  'בטיחות',
-  'מערכת גז',
-  'דחיסת לחץ גבוה',
-  'דחיסת לחץ נמוך',
-];
-
-export interface ChecklistItem {
-  id: number;
-  category: Category;
-  description: string;
-  status: Status;
+export interface CheckState {
+  status: CheckStatus;
   note: string;
+  value: string; // עבור שדות kind="value"
 }
 
-export interface MaintenanceReport {
-  technician: string;
-  hospital: string;
-  machineId: string;
-  items: ChecklistItem[];
-  imagePaths: Record<string, string>;
-  itemImagePaths: Record<number, string>;
-}
+export const EMPTY_CHECK_STATE: CheckState = { status: null, note: '', value: '' };
 
 // ─── Navigation types ──────────────────────────────────────────────────────
 
 export type ChecklistStackParamList = {
   ChecklistMain: undefined;
-  Category: { category: Category };
+  Section: { sectionIndex: number };
 };
 
 export type RootTabParamList = {

@@ -5,47 +5,83 @@ import {
   ScrollView,
   StyleSheet,
   TouchableOpacity,
+  Alert,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { ChecklistStackParamList, CATEGORIES } from '../types';
+import { ChecklistStackParamList } from '../types';
 import { useReport } from '../store/useReport';
-import { CategoryCard } from '../components/CategoryCard';
+import { checkKey, templateForSite } from '../data/checklists';
+import { SectionCard, SectionCounts } from '../components/SectionCard';
 import { LogoHeader } from '../components/LogoHeader';
-import { theme } from '../theme';
+import { Colors, sizes, useColors } from '../theme';
 
 type Props = NativeStackScreenProps<ChecklistStackParamList, 'ChecklistMain'>;
 
 export const ChecklistScreen: React.FC<Props> = ({ navigation }) => {
-  const { items, reset, itemImagePaths } = useReport();
+  const colors = useColors();
+  const styles = React.useMemo(() => createStyles(colors), [colors]);
 
-  const itemsByCategory = CATEGORIES.reduce<Record<string, typeof items>>(
-    (acc, cat) => {
-      acc[cat] = items.filter((i) => i.category === cat);
-      return acc;
-    },
-    {}
+  const site = useReport((s) => s.site);
+  const checkStates = useReport((s) => s.checkStates);
+  const checkImagePaths = useReport((s) => s.checkImagePaths);
+  const reset = useReport((s) => s.reset);
+  const effectiveSite = useReport((s) => s.effectiveSite);
+
+  const template = templateForSite(site);
+
+  // ספירות לכל סעיף
+  const sectionCounts: SectionCounts[] = template.sections.map((section, si) => {
+    const counts: SectionCounts = { total: 0, ok: 0, fail: 0, note: 0, pending: 0, photos: 0 };
+    section.checks.forEach((check, ci) => {
+      const key = checkKey(site, si, ci);
+      if (checkImagePaths[key]) counts.photos += 1;
+      if (check.kind !== 'check') return;
+      counts.total += 1;
+      const status = checkStates[key]?.status ?? null;
+      if (status === 'תקין') counts.ok += 1;
+      else if (status === 'לא תקין') counts.fail += 1;
+      else if (status === 'הערה') counts.note += 1;
+      else counts.pending += 1;
+    });
+    return counts;
+  });
+
+  const totals = sectionCounts.reduce(
+    (acc, c) => ({
+      total: acc.total + c.total,
+      ok: acc.ok + c.ok,
+      fail: acc.fail + c.fail,
+      note: acc.note + c.note,
+      pending: acc.pending + c.pending,
+    }),
+    { total: 0, ok: 0, fail: 0, note: 0, pending: 0 }
   );
+  const done = totals.total - totals.pending;
+  const progress = totals.total > 0 ? Math.round((done / totals.total) * 100) : 0;
 
-  const totalOk = items.filter((i) => i.status === 'תקין').length;
-  const totalFail = items.filter((i) => i.status === 'לא תקין').length;
-  const totalDone = items.filter((i) => i.status !== null).length;
-  const progress = items.length > 0 ? Math.round((totalDone / items.length) * 100) : 0;
+  const handleReset = () => {
+    Alert.alert('דוח חדש', 'האם לאפס את כל הנתונים ולהתחיל דוח חדש?', [
+      { text: 'ביטול', style: 'cancel' },
+      { text: 'אפס', style: 'destructive', onPress: reset },
+    ]);
+  };
 
   return (
     <View style={styles.wrapper}>
-      <LogoHeader />
+      <LogoHeader subtitle={effectiveSite()} />
       <ScrollView
         style={styles.container}
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Page header */}
         <View style={styles.pageHeader}>
           <Text style={styles.title}>רשימת בדיקה</Text>
-          <Text style={styles.subtitle}>תא היפרברי — {items.length} פריטים</Text>
+          <Text style={styles.subtitle}>
+            {template.sections.length} סעיפים · {totals.total} תתי-בדיקות
+          </Text>
         </View>
 
-        {/* Overall progress banner */}
+        {/* התקדמות כללית */}
         <View style={styles.progressBanner}>
           <View style={styles.progressRow}>
             <Text style={styles.progressLabel}>התקדמות כללית</Text>
@@ -55,48 +91,33 @@ export const ChecklistScreen: React.FC<Props> = ({ navigation }) => {
             <View style={[styles.progressFill, { width: `${progress}%` as any }]} />
           </View>
           <View style={styles.summaryRow}>
-            <View style={styles.summaryChip}>
-              <Text style={styles.chipTextOk}>תקין: {totalOk}</Text>
+            <View style={[styles.chip, { backgroundColor: colors.ok }]}>
+              <Text style={styles.chipText}>תקין: {totals.ok}</Text>
             </View>
-            <View style={[styles.summaryChip, styles.chipFail]}>
-              <Text style={styles.chipTextFail}>לא תקין: {totalFail}</Text>
+            <View style={[styles.chip, { backgroundColor: colors.fail }]}>
+              <Text style={styles.chipText}>לא תקין: {totals.fail}</Text>
             </View>
-            <View style={[styles.summaryChip, styles.chipPending]}>
-              <Text style={styles.chipTextPending}>ממתין: {items.length - totalDone}</Text>
+            <View style={[styles.chip, { backgroundColor: colors.noteBg }]}>
+              <Text style={styles.chipText}>הערות: {totals.note}</Text>
+            </View>
+            <View style={[styles.chip, styles.chipPending]}>
+              <Text style={styles.chipTextPending}>ממתין: {totals.pending}</Text>
             </View>
           </View>
         </View>
 
-        {/* Category cards */}
-        {CATEGORIES.map((cat) => {
-          const catItems = itemsByCategory[cat] ?? [];
-          const photoCount = catItems.filter((i) => !!itemImagePaths[i.id]).length;
-          return (
-            <CategoryCard
-              key={cat}
-              category={cat}
-              items={catItems}
-              onPress={() => navigation.navigate('Category', { category: cat })}
-              photoCount={photoCount}
-            />
-          );
-        })}
+        {/* כרטיסי סעיפים */}
+        {template.sections.map((section, si) => (
+          <SectionCard
+            key={`${site}_${si}`}
+            index={si}
+            name={section.name}
+            counts={sectionCounts[si]}
+            onPress={() => navigation.navigate('Section', { sectionIndex: si })}
+          />
+        ))}
 
-        {/* New report button */}
-        <TouchableOpacity
-          style={styles.resetBtn}
-          onPress={() => {
-            const { Alert } = require('react-native');
-            Alert.alert(
-              'דוח חדש',
-              'האם לאפס את כל הנתונים ולהתחיל דוח חדש?',
-              [
-                { text: 'ביטול', style: 'cancel' },
-                { text: 'אפס', style: 'destructive', onPress: reset },
-              ]
-            );
-          }}
-        >
+        <TouchableOpacity style={styles.resetBtn} onPress={handleReset}>
           <Text style={styles.resetBtnText}>🔄 דוח חדש</Text>
         </TouchableOpacity>
       </ScrollView>
@@ -104,109 +125,89 @@ export const ChecklistScreen: React.FC<Props> = ({ navigation }) => {
   );
 };
 
-const styles = StyleSheet.create({
-  wrapper: {
-    flex: 1,
-    backgroundColor: theme.lightBg,
-  },
-  container: {
-    flex: 1,
-    backgroundColor: theme.lightBg,
-  },
-  content: {
-    padding: theme.spacingMD,
-    paddingBottom: theme.spacingXL,
-  },
-  pageHeader: {
-    marginBottom: theme.spacingMD,
-  },
-  title: {
-    fontSize: theme.fontSizeXL,
-    fontWeight: 'bold',
-    color: theme.primary,
-    textAlign: 'right',
-  },
-  subtitle: {
-    fontSize: theme.fontSizeBody,
-    color: '#666',
-    textAlign: 'right',
-  },
-  progressBanner: {
-    backgroundColor: theme.primary,
-    borderRadius: theme.radiusMD,
-    padding: theme.spacingMD,
-    marginBottom: theme.spacingMD,
-  },
-  progressRow: {
-    flexDirection: 'row-reverse',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: theme.spacingXS,
-  },
-  progressLabel: {
-    color: theme.textDark,
-    fontSize: theme.fontSizeBody,
-    fontWeight: '600',
-  },
-  progressPct: {
-    color: theme.accent,
-    fontSize: theme.fontSizeLarge,
-    fontWeight: 'bold',
-  },
-  progressTrack: {
-    height: 8,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 4,
-    overflow: 'hidden',
-    marginBottom: theme.spacingSM,
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: theme.accent,
-    borderRadius: 4,
-  },
-  summaryRow: {
-    flexDirection: 'row-reverse',
-    gap: theme.spacingXS,
-  },
-  summaryChip: {
-    backgroundColor: theme.ok,
-    borderRadius: 12,
-    paddingHorizontal: theme.spacingSM,
-    paddingVertical: 3,
-  },
-  chipFail: {
-    backgroundColor: theme.fail,
-  },
-  chipPending: {
-    backgroundColor: 'rgba(255,255,255,0.15)',
-  },
-  chipTextOk: {
-    fontSize: theme.fontSizeSmall,
-    color: '#1a7a4a',
-    fontWeight: 'bold',
-  },
-  chipTextFail: {
-    fontSize: theme.fontSizeSmall,
-    color: '#a93226',
-    fontWeight: 'bold',
-  },
-  chipTextPending: {
-    fontSize: theme.fontSizeSmall,
-    color: theme.textDark,
-    fontWeight: 'bold',
-  },
-  resetBtn: {
-    marginTop: theme.spacingMD,
-    borderWidth: 1.5,
-    borderColor: theme.border,
-    borderRadius: theme.radiusMD,
-    padding: theme.spacingMD,
-    alignItems: 'center',
-  },
-  resetBtnText: {
-    fontSize: theme.fontSizeBody,
-    color: theme.primary,
-    fontWeight: '600',
-  },
-});
+const createStyles = (colors: Colors) =>
+  StyleSheet.create({
+    wrapper: { flex: 1, backgroundColor: colors.bg },
+    container: { flex: 1, backgroundColor: colors.bg },
+    content: { padding: sizes.spacingMD, paddingBottom: sizes.spacingXL },
+    pageHeader: { marginBottom: sizes.spacingMD },
+    title: {
+      fontSize: sizes.fontSizeXL,
+      fontWeight: 'bold',
+      color: colors.textBody,
+      textAlign: 'right',
+    },
+    subtitle: {
+      fontSize: sizes.fontSizeBody,
+      color: colors.textMuted,
+      textAlign: 'right',
+    },
+    progressBanner: {
+      backgroundColor: colors.primary,
+      borderRadius: sizes.radiusMD,
+      padding: sizes.spacingMD,
+      marginBottom: sizes.spacingMD,
+    },
+    progressRow: {
+      flexDirection: 'row-reverse',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: sizes.spacingXS,
+    },
+    progressLabel: {
+      color: colors.textOnDark,
+      fontSize: sizes.fontSizeBody,
+      fontWeight: '600',
+    },
+    progressPct: {
+      color: colors.accent,
+      fontSize: sizes.fontSizeLarge,
+      fontWeight: 'bold',
+    },
+    progressTrack: {
+      height: 8,
+      backgroundColor: 'rgba(255,255,255,0.2)',
+      borderRadius: 4,
+      overflow: 'hidden',
+      marginBottom: sizes.spacingSM,
+    },
+    progressFill: {
+      height: '100%',
+      backgroundColor: colors.accent,
+      borderRadius: 4,
+    },
+    summaryRow: {
+      flexDirection: 'row-reverse',
+      gap: sizes.spacingXS,
+      flexWrap: 'wrap',
+    },
+    chip: {
+      borderRadius: 12,
+      paddingHorizontal: sizes.spacingSM,
+      paddingVertical: 3,
+    },
+    chipPending: { backgroundColor: 'rgba(255,255,255,0.15)' },
+    chipText: {
+      fontSize: sizes.fontSizeSmall,
+      color: colors.textBody,
+      fontWeight: 'bold',
+    },
+    chipTextPending: {
+      fontSize: sizes.fontSizeSmall,
+      color: colors.textOnDark,
+      fontWeight: 'bold',
+    },
+    resetBtn: {
+      marginTop: sizes.spacingMD,
+      borderWidth: 1.5,
+      borderColor: colors.border,
+      borderRadius: sizes.radiusMD,
+      padding: sizes.spacingMD,
+      alignItems: 'center',
+    },
+    resetBtnText: {
+      fontSize: sizes.fontSizeBody,
+      color: colors.textBody,
+      fontWeight: '600',
+    },
+  });

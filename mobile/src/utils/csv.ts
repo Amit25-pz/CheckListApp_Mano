@@ -1,22 +1,24 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
-import { ChecklistItem } from '../types';
+import { templateForSite, checkKey, APP_VERSION } from '../data/checklists';
+import { CheckState } from '../types';
 
-interface ReportData {
+interface CsvData {
   technician: string;
-  hospital: string;
+  site: string;          // ערך ה-store
+  displaySite: string;   // שם להצגה
   machineId: string;
-  items: ChecklistItem[];
+  quarter: string;
+  checkStates: Record<string, CheckState>;
 }
 
 function escapeCell(value: string | number): string {
   const str = String(value);
-  // Wrap in quotes and escape any internal quotes (RFC 4180)
   return `"${str.replace(/"/g, '""')}"`;
 }
 
-function buildCsv(data: ReportData): string {
-  const { technician, hospital, machineId, items } = data;
+function buildCsv(data: CsvData): string {
+  const template = templateForSite(data.site);
   const now = new Date();
   const dateStr = now.toLocaleString('he-IL', {
     day: '2-digit',
@@ -28,33 +30,46 @@ function buildCsv(data: ReportData): string {
 
   const headers = [
     'תאריך',
+    'רבעון',
     'טכנאי',
-    'בית חולים',
-    'מזהה מכשיר',
-    'מזהה',
-    'קטגוריה',
-    'תיאור',
+    'אתר',
+    'מזהה מכונה',
+    'סעיף',
+    'תת-בדיקה',
+    'סוג',
     'סטטוס',
+    'ערך',
     'הערה',
+    'פנימי בלבד',
+    'גרסת אפליקציה',
   ];
 
-  const rows = items.map((item) => [
-    dateStr,
-    technician,
-    hospital,
-    machineId,
-    item.id,
-    item.category,
-    item.description,
-    item.status ?? 'ממתין',
-    item.note,
-  ]);
+  const rows: (string | number)[][] = [];
+  template.sections.forEach((section, si) => {
+    section.checks.forEach((check, ci) => {
+      const key = checkKey(data.site, si, ci);
+      const state = data.checkStates[key] ?? { status: null, note: '', value: '' };
+      rows.push([
+        dateStr,
+        data.quarter,
+        data.technician,
+        data.displaySite,
+        data.machineId,
+        section.name,
+        check.description,
+        check.kind === 'value' ? 'שדה ערך' : 'בדיקה',
+        check.kind === 'value' ? '' : state.status ?? 'לא נבדק',
+        state.value,
+        state.note,
+        check.internal ? 'כן' : '',
+        APP_VERSION,
+      ]);
+    });
+  });
 
-  const lines = [headers, ...rows].map((row) =>
-    row.map(escapeCell).join(',')
-  );
+  const lines = [headers, ...rows].map((row) => row.map(escapeCell).join(','));
 
-  // UTF-8 BOM (\uFEFF) — makes Hebrew readable when opened in Excel
+  // UTF-8 BOM — כדי שעברית תיפתח נכון באקסל
   return '\uFEFF' + lines.join('\r\n');
 }
 
@@ -64,10 +79,7 @@ function buildFilename(): string {
   return `report_${ts}.csv`;
 }
 
-/**
- * Generates a CSV file from the report data and shares it via the native share sheet.
- */
-export async function generateAndShareCsv(data: ReportData): Promise<void> {
+export async function generateAndShareCsv(data: CsvData): Promise<void> {
   const csv = buildCsv(data);
   const filename = buildFilename();
   const uri = (FileSystem.documentDirectory ?? FileSystem.cacheDirectory) + filename;
@@ -77,9 +89,7 @@ export async function generateAndShareCsv(data: ReportData): Promise<void> {
   });
 
   const canShare = await Sharing.isAvailableAsync();
-  if (!canShare) {
-    throw new Error('Sharing is not available on this device');
-  }
+  if (!canShare) throw new Error('Sharing is not available on this device');
 
   await Sharing.shareAsync(uri, {
     mimeType: 'text/csv',

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import {
   View,
   Text,
@@ -6,146 +6,39 @@ import {
   ScrollView,
   StyleSheet,
   TouchableOpacity,
-  Modal,
-  FlatList,
+  Switch,
 } from 'react-native';
 import { useReport } from '../store/useReport';
-import { theme } from '../theme';
+import { SITE_NAMES, APP_VERSION } from '../data/checklists';
+import { Colors, sizes, useColors } from '../theme';
 import { LogoHeader } from '../components/LogoHeader';
 
-const HOSPITALS = [
-  'בית חולים איכילוב',
-  'בית חולים הדסה',
-  'בית חולים רמב"ם',
-  'בית חולים שיבא (תל השומר)',
-  'בית חולים סורוקה',
-  'אחר...',
-];
-
-const MACHINE_IDS = [
-  'HBC-001',
-  'HBC-002',
-  'HBC-003',
-  'HBC-004',
-  'אחר...',
-];
-
-// ─── Generic picker modal ────────────────────────────────────────────────────
-
-interface PickerFieldProps {
-  label: string;
-  selectedValue: string;
-  options: string[];
-  onSelect: (value: string) => void;
-}
-
-const PickerField: React.FC<PickerFieldProps> = ({
-  label,
-  selectedValue,
-  options,
-  onSelect,
-}) => {
-  const [visible, setVisible] = useState(false);
-  const displayValue = selectedValue || `בחר ${label}...`;
-
-  return (
-    <>
-      <TouchableOpacity
-        style={styles.pickerBtn}
-        onPress={() => setVisible(true)}
-        activeOpacity={0.75}
-      >
-        <Text style={[styles.pickerBtnText, !selectedValue && styles.placeholder]}>
-          {displayValue}
-        </Text>
-        <Text style={styles.chevron}>▼</Text>
-      </TouchableOpacity>
-
-      <Modal visible={visible} transparent animationType="fade">
-        <TouchableOpacity
-          style={styles.overlay}
-          activeOpacity={1}
-          onPress={() => setVisible(false)}
-        >
-          <View style={styles.pickerModal}>
-            <Text style={styles.pickerModalTitle}>{label}</Text>
-            <FlatList
-              data={options}
-              keyExtractor={(item) => item}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  style={[
-                    styles.pickerOption,
-                    item === selectedValue && styles.pickerOptionActive,
-                  ]}
-                  onPress={() => {
-                    onSelect(item);
-                    setVisible(false);
-                  }}
-                >
-                  <Text
-                    style={[
-                      styles.pickerOptionText,
-                      item === selectedValue && styles.pickerOptionTextActive,
-                    ]}
-                  >
-                    {item}
-                  </Text>
-                </TouchableOpacity>
-              )}
-            />
-          </View>
-        </TouchableOpacity>
-      </Modal>
-    </>
-  );
-};
-
-// ─── Screen ──────────────────────────────────────────────────────────────────
+const SITE_OPTIONS = [...SITE_NAMES, 'אחר...'];
 
 export const ReportInfoScreen: React.FC = () => {
-  const { technician, hospital, machineId, updateMeta, completeSetup, isSetupComplete } = useReport();
+  const colors = useColors();
+  const styles = React.useMemo(() => createStyles(colors), [colors]);
 
-  // Local picker state
-  const knownHospitals = HOSPITALS.slice(0, -1);
-  const knownMachines = MACHINE_IDS.slice(0, -1);
+  const {
+    technician,
+    site,
+    customSiteName,
+    machineId,
+    quarter,
+    darkMode,
+    updateMeta,
+    toggleDarkMode,
+    completeSetup,
+    isSetupComplete,
+    effectiveSite,
+  } = useReport();
 
-  const [hospitalPick, setHospitalPick] = useState<string>(() =>
-    knownHospitals.includes(hospital) ? hospital : hospital ? 'אחר...' : ''
-  );
-  const [hospitalCustom, setHospitalCustom] = useState<string>(() =>
-    knownHospitals.includes(hospital) ? '' : hospital
-  );
+  const canStart =
+    technician.trim() !== '' &&
+    effectiveSite().trim() !== '' &&
+    machineId.trim() !== '';
 
-  const [machinePick, setMachinePick] = useState<string>(() =>
-    knownMachines.includes(machineId) ? machineId : machineId ? 'אחר...' : ''
-  );
-  const [machineCustom, setMachineCustom] = useState<string>(() =>
-    knownMachines.includes(machineId) ? '' : machineId
-  );
-
-  // Sync derived values back to the store
-  useEffect(() => {
-    const eff = hospitalPick === 'אחר...' ? hospitalCustom : hospitalPick;
-    updateMeta({ hospital: eff });
-  }, [hospitalPick, hospitalCustom]);
-
-  useEffect(() => {
-    const eff = machinePick === 'אחר...' ? machineCustom : machinePick;
-    updateMeta({ machineId: eff });
-  }, [machinePick, machineCustom]);
-
-  const effectiveHospital = hospitalPick === 'אחר...' ? hospitalCustom : hospitalPick;
-  const effectiveMachine = machinePick === 'אחר...' ? machineCustom : machinePick;
-  const canStart = technician.trim() !== '' && effectiveHospital.trim() !== '' && effectiveMachine.trim() !== '';
-
-  // Only show Setup-mode "Start" button when not yet set up
   const isSetupMode = !isSetupComplete;
-
-  const handleStart = () => {
-    completeSetup();
-    // Navigation happens automatically via RootNavigator re-render
-  };
 
   return (
     <View style={styles.wrapper}>
@@ -162,7 +55,18 @@ export const ReportInfoScreen: React.FC = () => {
           </>
         )}
 
-        {/* Technician */}
+        {/* מצב לילה */}
+        <View style={styles.darkModeRow}>
+          <Text style={styles.label}>🌙 מצב לילה</Text>
+          <Switch
+            value={darkMode}
+            onValueChange={toggleDarkMode}
+            trackColor={{ false: '#ccc', true: colors.accent }}
+            thumbColor={darkMode ? '#4A4F6E' : '#f4f3f4'}
+          />
+        </View>
+
+        {/* טכנאי */}
         <View style={styles.fieldGroup}>
           <Text style={styles.label}>שם הטכנאי</Text>
           <TextInput
@@ -170,264 +74,249 @@ export const ReportInfoScreen: React.FC = () => {
             value={technician}
             onChangeText={(t) => updateMeta({ technician: t })}
             placeholder="הזן שם טכנאי"
-            placeholderTextColor="#999"
+            placeholderTextColor={colors.textMuted}
             textAlign="right"
           />
         </View>
 
-        {/* Hospital */}
+        {/* אתר — בחירת תבנית */}
         <View style={styles.fieldGroup}>
-          <Text style={styles.label}>בית חולים</Text>
-          <PickerField
-            label="בית חולים"
-            selectedValue={hospitalPick}
-            options={HOSPITALS}
-            onSelect={setHospitalPick}
-          />
-          {hospitalPick === 'אחר...' && (
+          <Text style={styles.label}>אתר / תא לחץ</Text>
+          <Text style={styles.hint}>
+            בחירת האתר טוענת את רשימת הבדיקה המתאימה לו
+          </Text>
+          <View style={styles.siteChips}>
+            {SITE_OPTIONS.map((s) => (
+              <TouchableOpacity
+                key={s}
+                style={[styles.siteChip, site === s && styles.siteChipActive]}
+                onPress={() => updateMeta({ site: s })}
+                activeOpacity={0.75}
+              >
+                <Text
+                  style={[styles.siteChipText, site === s && styles.siteChipTextActive]}
+                >
+                  {s}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          {site === 'אחר...' && (
             <TextInput
               style={[styles.textInput, styles.customInput]}
-              value={hospitalCustom}
-              onChangeText={setHospitalCustom}
-              placeholder="הזן שם בית חולים"
-              placeholderTextColor="#999"
+              value={customSiteName}
+              onChangeText={(t) => updateMeta({ customSiteName: t })}
+              placeholder="הזן שם אתר (ייטען צ'ק-ליסט כללי)"
+              placeholderTextColor={colors.textMuted}
               textAlign="right"
             />
           )}
         </View>
 
-        {/* Machine ID */}
+        {/* מזהה מכונה */}
         <View style={styles.fieldGroup}>
-          <Text style={styles.label}>מזהה מכשיר</Text>
-          <PickerField
-            label="מזהה מכשיר"
-            selectedValue={machinePick}
-            options={MACHINE_IDS}
-            onSelect={setMachinePick}
+          <Text style={styles.label}>מזהה מכונה / תא</Text>
+          <TextInput
+            style={styles.textInput}
+            value={machineId}
+            onChangeText={(t) => updateMeta({ machineId: t })}
+            placeholder="לדוגמה: תא לחץ 1"
+            placeholderTextColor={colors.textMuted}
+            textAlign="right"
           />
-          {machinePick === 'אחר...' && (
-            <TextInput
-              style={[styles.textInput, styles.customInput]}
-              value={machineCustom}
-              onChangeText={setMachineCustom}
-              placeholder="הזן מזהה מכשיר"
-              placeholderTextColor="#999"
-              textAlign="right"
-            />
-          )}
         </View>
 
-        {/* Summary card — show in edit mode only */}
+        {/* רבעון */}
+        <View style={styles.fieldGroup}>
+          <Text style={styles.label}>רבעון</Text>
+          <Text style={styles.hint}>מחושב אוטומטית לפי התאריך — ניתן לשינוי</Text>
+          <TextInput
+            style={styles.textInput}
+            value={quarter}
+            onChangeText={(t) => updateMeta({ quarter: t })}
+            placeholder="Q1 / Q2 / Q3 / Q4"
+            placeholderTextColor={colors.textMuted}
+            textAlign="right"
+          />
+        </View>
+
+        {/* סיכום במצב עריכה */}
         {!isSetupMode && (
           <View style={styles.summaryCard}>
             <Text style={styles.summaryTitle}>סיכום פרטים</Text>
-            <SummaryRow label="טכנאי" value={technician} />
-            <SummaryRow label="בית חולים" value={effectiveHospital} />
-            <SummaryRow label="מזהה מכשיר" value={effectiveMachine} />
+            <SummaryRow styles={styles} label="טכנאי" value={technician} />
+            <SummaryRow styles={styles} label="אתר" value={effectiveSite()} />
+            <SummaryRow styles={styles} label="מזהה מכונה" value={machineId} />
+            <SummaryRow styles={styles} label="רבעון" value={quarter} />
           </View>
         )}
 
-        {/* Start button — shown in setup mode only */}
+        {/* כפתור התחלה */}
         {isSetupMode && (
           <TouchableOpacity
             style={[styles.startBtn, !canStart && styles.startBtnDisabled]}
-            onPress={handleStart}
+            onPress={completeSetup}
             disabled={!canStart}
             activeOpacity={0.8}
           >
-            <Text style={[styles.startBtnText, !canStart && styles.startBtnTextDisabled]}>
-              התחל בדיקה ←
-            </Text>
+            <Text style={styles.startBtnText}>התחל בדיקה ←</Text>
           </TouchableOpacity>
         )}
 
         {isSetupMode && !canStart && (
-          <Text style={styles.hintText}>יש למלא את כל השדות כדי להמשיך</Text>
+          <Text style={styles.hintCenter}>יש למלא טכנאי, אתר ומזהה מכונה כדי להמשיך</Text>
         )}
+
+        <Text style={styles.versionText}>גרסת אפליקציה: {APP_VERSION}</Text>
       </ScrollView>
     </View>
   );
 };
 
-const SummaryRow: React.FC<{ label: string; value: string }> = ({ label, value }) => (
+const SummaryRow: React.FC<{ styles: any; label: string; value: string }> = ({
+  styles,
+  label,
+  value,
+}) => (
   <View style={styles.summaryRow}>
     <Text style={styles.summaryLabel}>{label}:</Text>
     <Text style={styles.summaryValue}>{value || '—'}</Text>
   </View>
 );
 
-const styles = StyleSheet.create({
-  wrapper: {
-    flex: 1,
-    backgroundColor: theme.lightBg,
-  },
-  container: {
-    flex: 1,
-  },
-  content: {
-    padding: theme.spacingMD,
-    paddingBottom: theme.spacingXL,
-  },
-  pageTitle: {
-    fontSize: theme.fontSizeXL,
-    fontWeight: 'bold',
-    color: theme.primary,
-    textAlign: 'right',
-    marginBottom: 4,
-  },
-  pageSubtitle: {
-    fontSize: theme.fontSizeBody,
-    color: '#666',
-    textAlign: 'right',
-    marginBottom: theme.spacingMD,
-  },
-  fieldGroup: {
-    marginBottom: theme.spacingMD,
-  },
-  label: {
-    fontSize: theme.fontSizeBody,
-    fontWeight: '600',
-    color: theme.primary,
-    textAlign: 'right',
-    marginBottom: 6,
-  },
-  textInput: {
-    backgroundColor: theme.white,
-    borderWidth: 1,
-    borderColor: theme.border,
-    borderRadius: theme.radiusSM,
-    padding: theme.spacingSM,
-    fontSize: theme.fontSizeBody,
-    color: theme.textBody,
-    height: 48,
-  },
-  customInput: {
-    marginTop: theme.spacingXS,
-  },
-  // Picker
-  pickerBtn: {
-    backgroundColor: theme.white,
-    borderWidth: 1,
-    borderColor: theme.border,
-    borderRadius: theme.radiusSM,
-    height: 48,
-    paddingHorizontal: theme.spacingMD,
-    flexDirection: 'row-reverse',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  pickerBtnText: {
-    fontSize: theme.fontSizeBody,
-    color: theme.textBody,
-    flex: 1,
-    textAlign: 'right',
-  },
-  placeholder: {
-    color: '#999',
-  },
-  chevron: {
-    color: theme.border,
-    fontSize: theme.fontSizeSmall,
-    marginStart: theme.spacingXS,
-  },
-  // Picker modal
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    padding: theme.spacingMD,
-  },
-  pickerModal: {
-    backgroundColor: theme.white,
-    borderRadius: theme.radiusMD,
-    overflow: 'hidden',
-    maxHeight: 320,
-  },
-  pickerModalTitle: {
-    fontSize: theme.fontSizeMedium,
-    fontWeight: 'bold',
-    color: theme.primary,
-    textAlign: 'right',
-    padding: theme.spacingMD,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.border,
-  },
-  pickerOption: {
-    padding: theme.spacingMD,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  pickerOptionActive: {
-    backgroundColor: theme.lightBg,
-  },
-  pickerOptionText: {
-    fontSize: theme.fontSizeBody,
-    color: theme.textBody,
-    textAlign: 'right',
-  },
-  pickerOptionTextActive: {
-    color: theme.primary,
-    fontWeight: 'bold',
-  },
-  // Summary card
-  summaryCard: {
-    backgroundColor: theme.white,
-    borderRadius: theme.radiusMD,
-    padding: theme.spacingMD,
-    borderWidth: 1,
-    borderColor: theme.border,
-    marginTop: theme.spacingMD,
-  },
-  summaryTitle: {
-    fontSize: theme.fontSizeMedium,
-    fontWeight: 'bold',
-    color: theme.primary,
-    textAlign: 'right',
-    marginBottom: theme.spacingSM,
-  },
-  summaryRow: {
-    flexDirection: 'row-reverse',
-    justifyContent: 'space-between',
-    paddingVertical: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  summaryLabel: {
-    fontSize: theme.fontSizeBody,
-    color: '#666',
-    textAlign: 'right',
-  },
-  summaryValue: {
-    fontSize: theme.fontSizeBody,
-    color: theme.textBody,
-    fontWeight: '500',
-    textAlign: 'left',
-  },
-  // Start button
-  startBtn: {
-    backgroundColor: theme.primary,
-    borderRadius: theme.radiusMD,
-    padding: theme.spacingMD,
-    alignItems: 'center',
-    marginTop: theme.spacingMD,
-    minHeight: 52,
-    justifyContent: 'center',
-  },
-  startBtnDisabled: {
-    opacity: 0.4,
-  },
-  startBtnText: {
-    color: theme.accent,
-    fontSize: theme.fontSizeMedium,
-    fontWeight: 'bold',
-  },
-  startBtnTextDisabled: {
-    color: theme.textDark,
-  },
-  hintText: {
-    fontSize: theme.fontSizeSmall,
-    color: '#888',
-    textAlign: 'center',
-    marginTop: theme.spacingSM,
-  },
-});
+const createStyles = (colors: Colors) =>
+  StyleSheet.create({
+    wrapper: { flex: 1, backgroundColor: colors.bg },
+    container: { flex: 1 },
+    content: { padding: sizes.spacingMD, paddingBottom: sizes.spacingXL },
+    pageTitle: {
+      fontSize: sizes.fontSizeXL,
+      fontWeight: 'bold',
+      color: colors.textBody,
+      textAlign: 'right',
+      marginBottom: 4,
+    },
+    pageSubtitle: {
+      fontSize: sizes.fontSizeBody,
+      color: colors.textMuted,
+      textAlign: 'right',
+      marginBottom: sizes.spacingMD,
+    },
+    darkModeRow: {
+      flexDirection: 'row-reverse',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      backgroundColor: colors.card,
+      borderRadius: sizes.radiusSM,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: sizes.spacingSM,
+      marginBottom: sizes.spacingMD,
+    },
+    fieldGroup: { marginBottom: sizes.spacingMD },
+    label: {
+      fontSize: sizes.fontSizeBody,
+      fontWeight: '600',
+      color: colors.textBody,
+      textAlign: 'right',
+      marginBottom: 6,
+    },
+    hint: {
+      fontSize: sizes.fontSizeSmall,
+      color: colors.textMuted,
+      textAlign: 'right',
+      marginBottom: 6,
+    },
+    hintCenter: {
+      fontSize: sizes.fontSizeSmall,
+      color: colors.textMuted,
+      textAlign: 'center',
+      marginTop: sizes.spacingSM,
+    },
+    textInput: {
+      backgroundColor: colors.inputBg,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: sizes.radiusSM,
+      padding: sizes.spacingSM,
+      fontSize: sizes.fontSizeBody,
+      color: colors.textBody,
+      height: 48,
+    },
+    customInput: { marginTop: sizes.spacingXS },
+    siteChips: {
+      flexDirection: 'row-reverse',
+      flexWrap: 'wrap',
+      gap: sizes.spacingXS,
+    },
+    siteChip: {
+      borderWidth: 1.5,
+      borderColor: colors.border,
+      borderRadius: 20,
+      paddingHorizontal: sizes.spacingMD,
+      paddingVertical: sizes.spacingSM,
+      backgroundColor: colors.card,
+    },
+    siteChipActive: {
+      backgroundColor: '#4A4F6E',
+      borderColor: colors.accent,
+    },
+    siteChipText: {
+      fontSize: sizes.fontSizeBody,
+      color: colors.textBody,
+      fontWeight: '500',
+    },
+    siteChipTextActive: {
+      color: colors.accent,
+      fontWeight: 'bold',
+    },
+    summaryCard: {
+      backgroundColor: colors.card,
+      borderRadius: sizes.radiusMD,
+      padding: sizes.spacingMD,
+      borderWidth: 1,
+      borderColor: colors.border,
+      marginTop: sizes.spacingSM,
+    },
+    summaryTitle: {
+      fontSize: sizes.fontSizeMedium,
+      fontWeight: 'bold',
+      color: colors.textBody,
+      textAlign: 'right',
+      marginBottom: sizes.spacingSM,
+    },
+    summaryRow: {
+      flexDirection: 'row-reverse',
+      justifyContent: 'space-between',
+      paddingVertical: 6,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    summaryLabel: { fontSize: sizes.fontSizeBody, color: colors.textMuted },
+    summaryValue: {
+      fontSize: sizes.fontSizeBody,
+      color: colors.textBody,
+      fontWeight: '500',
+    },
+    startBtn: {
+      backgroundColor: '#4A4F6E',
+      borderRadius: sizes.radiusMD,
+      padding: sizes.spacingMD,
+      alignItems: 'center',
+      marginTop: sizes.spacingMD,
+      minHeight: 52,
+      justifyContent: 'center',
+    },
+    startBtnDisabled: { opacity: 0.4 },
+    startBtnText: {
+      color: '#CEC28C',
+      fontSize: sizes.fontSizeMedium,
+      fontWeight: 'bold',
+    },
+    versionText: {
+      fontSize: sizes.fontSizeSmall,
+      color: colors.textMuted,
+      textAlign: 'center',
+      marginTop: sizes.spacingLG,
+    },
+  });
