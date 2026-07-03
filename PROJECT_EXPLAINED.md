@@ -8,6 +8,49 @@ But just like your bike needs its tires checked before you ride, this machine ne
 
 ---
 
+## 🆕 BIG UPDATE — Version 2.0 (July 2026)
+
+**Everything below this box describes Version 1.** The phone app still works that way. But the computer (Streamlit) app got a **huge upgrade**. Here's the story:
+
+### What happened?
+
+The boss came back with **5 Word documents** — one checklist for each place that has a pressure chamber: **Arison, Segol, Elisha (אלישע), the Navy (חיל הים)**, and one general template. Surprise: **the lists are not the same!** For example, Elisha and the Navy don't have the "LP compressors" section at all.
+
+Version 1 had ONE list of 38 items for everybody. That's like giving every kid in class the same homework even though they're in different grades. Wrong!
+
+### What changed in Version 2?
+
+1. **Pick a site, get the right list** — When the technician picks "Arison" in the app, the app loads Arison's exact checklist. Pick "חיל הים", get the Navy's list. (File: `checklists.py`)
+
+2. **Sections with sub-checks** — Before: one line said "Main electrical panel — OK?". Now: "Main electrical panel" is a **folder** that opens up, and inside there are 5 small checks ("indicator lights", "air filters", "thermostat"...). Each small check gets its own OK / Not OK / Note. Up to ~110 checks total!
+
+3. **Fill-in fields** — Some checks need a real answer, not just OK/Not-OK. Like "Last treatment date: ____" or "Working hours: ____". The app now has typing boxes for those.
+
+4. **TWO PDF reports instead of one** 🕵️ — Some information (like treatment dates and working hours) is **for the company only** — the customer shouldn't see it in the weekly report. So the app now makes:
+   - **Internal report** — everything, for the company
+   - **Customer report** — same report but with the secret fields removed
+   The secret fields show a 🔒 lock icon in the app.
+
+5. **Quarter field** — Reports now note which quarter of the year it is (Q1, Q2, Q3, Q4). The app figures it out from the date by itself.
+
+6. **"Mark all OK" button** — In real life most things ARE fine. One tap marks a whole section as OK, so the technician only touches the broken stuff.
+
+7. **Version numbers** — The app now says which version it is (2.0.0), there's a `CHANGELOG.md` file that lists every change, and git tags (`v1.0.0`, `v2.0.0`) keep old versions safe forever — like save points in a video game.
+
+### Bugs that got squashed 🐛
+
+- Choosing "Note" without typing text used to erase itself. Fixed.
+- The report's file name got "stuck" after the first save — even if you changed the machine name. Fixed.
+- File names typed by the user are now cleaned of dangerous characters (security!).
+
+### Security upgrades 🔐
+
+- The app now only listens to YOUR computer (`localhost`) — nobody on the same WiFi can open it.
+- No usage statistics are sent anywhere.
+- Upload size is limited, and the private `data/` folder still never goes to GitHub.
+
+---
+
 ## The Two Versions of the App
 
 This project has **two versions** of the same app — like having the same game on both your computer and your phone.

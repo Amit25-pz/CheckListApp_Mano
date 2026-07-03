@@ -1,41 +1,43 @@
-"""יומן תחזוקה תא היפרברי — Hyperbaric Chamber Maintenance Log."""
+# -*- coding: utf-8 -*-
+"""יומן בדיקות ואחזקה בתא לחץ — גרסה 2: תבניות לפי אתר, דוח פנימי ודוח לקוח."""
 
 from __future__ import annotations
 
-import os
 from datetime import datetime
-from pathlib import Path
 
 import streamlit as st
 from pydantic import ValidationError
 
+from checklists import SITE_NAMES, TEMPLATES
 from models import (
-    Category,
-    ChecklistItem,
+    APP_VERSION,
+    CheckResult,
     MaintenanceReport,
+    SectionResult,
     Status,
     generate_filename,
-    generate_pdf_bytes,
-    get_default_items,
+    quarter_from_date,
     report_to_dataframe,
+    sanitize_filename_part,
 )
+from pdf import generate_pdf_bytes
+from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# Page configuration
+# הגדרות עמוד ועיצוב
 # ---------------------------------------------------------------------------
 
 st.set_page_config(
-    page_title="יומן תחזוקה היפרברי",
+    page_title="יומן בדיקות תא לחץ",
     page_icon="🏥",
     layout="centered",
     initial_sidebar_state="expanded",
 )
 
-# Brand colours (from company logo)
-PRIMARY   = "#4A4F6E"   # dark navy / logo background
-ACCENT    = "#CEC28C"   # warm gold / logo illustration
-LIGHT_BG  = "#F5F0E6"   # very light cream
-TEXT_DARK = "#EDE8D5"   # cream text on dark backgrounds
+PRIMARY   = "#4A4F6E"   # כחול-נייבי מהלוגו
+ACCENT    = "#CEC28C"   # זהב חם מהלוגו
+LIGHT_BG  = "#F5F0E6"   # קרם בהיר
+TEXT_DARK = "#EDE8D5"   # קרם על רקע כהה
 
 st.markdown(
     f"""
@@ -45,30 +47,21 @@ st.markdown(
         .stRadio > div {{ flex-direction: row; }}
         .stTextInput > label,
         .stSelectbox > label,
-        .stTextArea > label {{ text-align: right; }}
+        .stTextArea > label,
+        .stDateInput > label {{ text-align: right; }}
         h1, h2, h3, p {{ text-align: right; }}
         .block-container {{ padding-top: 1rem; }}
 
-        /* ── Sidebar: fully hidden when collapsed ── */
+        /* ── סרגל צד ── */
         section[data-testid="stSidebar"][aria-expanded="false"] {{
             width: 0 !important;
             min-width: 0 !important;
             overflow: hidden !important;
             padding: 0 !important;
         }}
-        [data-testid="collapsedControl"] {{
-            display: none !important;
-        }}
-
-        /* ── Sidebar colours ── */
-        section[data-testid="stSidebar"] {{
-            background-color: {PRIMARY};
-        }}
-        /* All sidebar text: black */
-        section[data-testid="stSidebar"] * {{
-            color: #000000 !important;
-        }}
-        /* Input cells: white background, black text */
+        [data-testid="collapsedControl"] {{ display: none !important; }}
+        section[data-testid="stSidebar"] {{ background-color: {PRIMARY}; }}
+        section[data-testid="stSidebar"] * {{ color: #000000 !important; }}
         section[data-testid="stSidebar"] input,
         section[data-testid="stSidebar"] textarea,
         section[data-testid="stSidebar"] [data-baseweb="select"] > div,
@@ -78,17 +71,12 @@ st.markdown(
             border-color: {ACCENT} !important;
         }}
 
-        /* ── Main content: always black text (fixes mobile) ── */
-        .main *, .block-container * {{
-            color: #000000;
-        }}
-        /* Re-apply exceptions that need non-black */
+        /* ── תוכן ראשי ── */
+        .main *, .block-container * {{ color: #000000; }}
         h1, h2, h3 {{ color: {PRIMARY} !important; }}
-
-        /* ── App background ── */
         .stApp {{ background-color: {LIGHT_BG}; }}
 
-        /* ── Primary button ("שמור דוח") ── */
+        /* ── כפתור ראשי ── */
         div.stButton > button[kind="primary"] {{
             background-color: {PRIMARY} !important;
             color: {ACCENT} !important;
@@ -100,75 +88,33 @@ st.markdown(
             color: {TEXT_DARK} !important;
         }}
 
-        /* ── Download button ── */
+        /* ── כפתורי הורדה ── */
         div.stDownloadButton > button {{
             background-color: {ACCENT} !important;
             color: {PRIMARY} !important;
             font-weight: bold;
             border: none;
         }}
-        div.stDownloadButton > button:hover {{
-            background-color: #DDD3A0 !important;
-        }}
+        div.stDownloadButton > button:hover {{ background-color: #DDD3A0 !important; }}
     </style>
     """,
     unsafe_allow_html=True,
 )
 
 # ---------------------------------------------------------------------------
-# Constants
+# תיקיות נתונים
 # ---------------------------------------------------------------------------
-
-HOSPITALS = [
-    "בית חולים איכילוב",
-    "בית חולים הדסה",
-    "בית חולים רמב\"ם",
-    "בית חולים שיבא (תל השומר)",
-    "בית חולים סורוקה",
-    "אחר...",
-]
-
-MACHINE_IDS = [
-    "HBC-001",
-    "HBC-002",
-    "HBC-003",
-    "HBC-004",
-    "אחר...",
-]
 
 DATA_DIR = Path("data")
 REPORTS_DIR = DATA_DIR / "reports"
 IMAGES_DIR = DATA_DIR / "images"
-
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 IMAGES_DIR.mkdir(parents=True, exist_ok=True)
 
-# ---------------------------------------------------------------------------
-# Session state initialisation
-# ---------------------------------------------------------------------------
-
-if "checklist_items" not in st.session_state:
-    st.session_state.checklist_items = get_default_items()
-
-if "camera_open" not in st.session_state:
-    st.session_state.camera_open = {cat.value: False for cat in Category}
-
-if "image_paths" not in st.session_state:
-    st.session_state.image_paths = {}  # category.value -> file path
-
-if "saved_report" not in st.session_state:
-    st.session_state.saved_report = None  # (csv_bytes, filename) after first save
-
-if "report_filename" not in st.session_state:
-    st.session_state.report_filename = None  # fixed for the whole session
-
-
-def toggle_camera(category_value: str) -> None:
-    st.session_state.camera_open[category_value] = not st.session_state.camera_open[category_value]
-
+UI_STATUSES = [Status.OK.value, Status.FAILED.value, Status.NOTE.value]
 
 # ---------------------------------------------------------------------------
-# Sidebar — report metadata
+# סרגל צד — פרטי הדוח
 # ---------------------------------------------------------------------------
 
 with st.sidebar:
@@ -177,197 +123,283 @@ with st.sidebar:
 
     technician = st.text_input("שם הטכנאי", value="עמנואל גוטמן")
 
-    hospital_choice = st.selectbox("בית חולים", HOSPITALS)
-    if hospital_choice == "אחר...":
-        hospital = st.text_input("הזן שם בית חולים", key="hospital_custom")
-    else:
-        hospital = hospital_choice
+    site_options = SITE_NAMES + ["אחר..."]
+    site_choice = st.selectbox("אתר / תא לחץ", site_options)
 
-    machine_choice = st.selectbox("מזהה מכשיר", MACHINE_IDS)
-    if machine_choice == "אחר...":
-        machine_id = st.text_input("הזן מזהה מכשיר", key="machine_custom")
+    if site_choice == "אחר...":
+        site_name = st.text_input("הזן שם אתר", key="site_custom")
+        template = TEMPLATES["כללי"]          # אתר לא מוכר ⇒ התבנית הכללית
     else:
-        machine_id = machine_choice
+        site_name = site_choice
+        template = TEMPLATES[site_choice]
+
+    machine_id = st.text_input("מזהה מכונה / תא", placeholder="לדוגמה: תא לחץ 1")
+
+    report_date = st.date_input("תאריך הבדיקה", value=datetime.now().date())
+    quarter = st.text_input(
+        "רבעון",
+        value=quarter_from_date(datetime(report_date.year, report_date.month, 1)),
+        help="מחושב אוטומטית מהתאריך; ניתן לשינוי ידני",
+    )
 
     st.markdown("---")
-    st.caption(f"תאריך: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
+    if st.button("🔄 דוח חדש (איפוס הטופס)", use_container_width=True):
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.rerun()
+
+    st.caption(f"גרסת אפליקציה: {APP_VERSION}")
+
+# מפתחות הווידג'טים כוללים את שם האתר, כך שמעבר בין אתרים לא מערבב נתונים
+site_key = sanitize_filename_part(site_name or "ללא_שם")
 
 # ---------------------------------------------------------------------------
-# Main header
+# ניהול מצב: מצלמות ותמונות לפי סעיף
 # ---------------------------------------------------------------------------
 
-st.title("🏥 יומן תחזוקה — תא היפרברי")
-st.markdown("מלא את רשימת הבדיקה עבור כל הקטגוריות, לאחר מכן לחץ **שמור דוח**.")
+if "camera_open" not in st.session_state:
+    st.session_state.camera_open = {}
+if "image_paths" not in st.session_state:
+    st.session_state.image_paths = {}   # (site, section) -> path
+if "saved_outputs" not in st.session_state:
+    st.session_state.saved_outputs = None
+
+
+def toggle_camera(cam_key: str) -> None:
+    st.session_state.camera_open[cam_key] = not st.session_state.camera_open.get(cam_key, False)
+
+
+def mark_section_ok(section_index: int, num_checks: list[int]) -> None:
+    """כפתור 'הכל תקין' — מסמן את כל תתי-הבדיקות בסעיף כתקינות."""
+    for ci in num_checks:
+        st.session_state[f"{site_key}_s{section_index}_c{ci}_status"] = Status.OK.value
+
+
+# ---------------------------------------------------------------------------
+# כותרת ראשית + סיכום חי
+# ---------------------------------------------------------------------------
+
+st.title("🏥 יומן בדיקות ואחזקה בתא לחץ")
+st.markdown(f"**אתר: {site_name or '—'}** · עבור על הסעיפים, סמן חריגים, ולחץ **שמור דוח**.")
+
+# ספירה חיה מתוך מצב הווידג'טים (לפני הרינדור — מהריצה הקודמת)
+live_failed = 0
+live_notes = 0
+total_checks = 0
+for si, section in enumerate(template.sections):
+    for ci, check in enumerate(section.checks):
+        if check.kind != "check":
+            continue
+        total_checks += 1
+        val = st.session_state.get(f"{site_key}_s{si}_c{ci}_status", Status.OK.value)
+        if val == Status.FAILED.value:
+            live_failed += 1
+        elif val == Status.NOTE.value:
+            live_notes += 1
+
+m1, m2, m3, m4 = st.columns(4)
+m1.metric("סה\"כ בדיקות", total_checks)
+m2.metric("תקין ✅", total_checks - live_failed - live_notes)
+m3.metric("לא תקין ❌", live_failed)
+m4.metric("הערות ✱", live_notes)
 st.markdown("---")
 
 # ---------------------------------------------------------------------------
-# Camera inputs (outside form — must use session state callbacks)
+# הסעיפים — expander לכל סעיף ראשי
 # ---------------------------------------------------------------------------
 
-# Build a lookup: category -> list of item indices in session_state.checklist_items
-items_by_category: dict[str, list[int]] = {}
-for idx, item in enumerate(st.session_state.checklist_items):
-    items_by_category.setdefault(item.category.value, []).append(idx)
+for si, section in enumerate(template.sections):
+    # אייקון סטטוס בכותרת הסעיף לפי מצב הריצה הקודמת
+    section_failed = any(
+        st.session_state.get(f"{site_key}_s{si}_c{ci}_status") == Status.FAILED.value
+        for ci, c in enumerate(section.checks) if c.kind == "check"
+    )
+    section_noted = any(
+        st.session_state.get(f"{site_key}_s{si}_c{ci}_status") == Status.NOTE.value
+        for ci, c in enumerate(section.checks) if c.kind == "check"
+    )
+    icon = "❌" if section_failed else ("✱" if section_noted else "✅")
 
-# ---------------------------------------------------------------------------
-# Checklist (no st.form — allows reactive note field on status change)
-# ---------------------------------------------------------------------------
-
-for category in Category:
-    cat_val = category.value
-    indices = items_by_category.get(cat_val, [])
-
-    st.subheader(f"📋 {cat_val}")
-
-    for idx in indices:
-        item: ChecklistItem = st.session_state.checklist_items[idx]
-
-        # UI options: "הערה" is a UI-only choice that keeps status=תקין
-        # but opens the note field.
-        UI_OPTIONS = ["תקין", "לא תקין", "הערה"]
-
-        # Derive the current UI selection from the stored model state
-        if item.status == Status.FAILED:
-            current_ui = "לא תקין"
-        elif item.note:
-            current_ui = "הערה"
-        else:
-            current_ui = "תקין"
-
-        col_label, col_status = st.columns([3, 2])
-        with col_label:
-            st.markdown(f"**{item.id}. {item.description}**")
-        with col_status:
-            status_choice = st.radio(
-                label=f"סטטוס_{item.id}",
-                options=UI_OPTIONS,
-                index=UI_OPTIONS.index(current_ui),
-                horizontal=True,
-                label_visibility="collapsed",
-                key=f"status_{item.id}",
-            )
-
-        # Note field opens for "לא תקין" or "הערה"; "הערה" keeps status=תקין
-        if status_choice in ("לא תקין", "הערה"):
-            note = st.text_input(
-                f"הערה לפריט {item.id}",
-                value=item.note,
-                key=f"note_{item.id}",
-                label_visibility="visible",
-            )
-        else:
-            note = ""
-
-        # Map UI choice → model Status ("הערה" stays תקין)
-        actual_status = Status.FAILED if status_choice == "לא תקין" else Status.OK
-
-        # Write back to session state so values persist across reruns
-        st.session_state.checklist_items[idx] = item.model_copy(
-            update={"status": actual_status, "note": note}
+    with st.expander(f"{icon} {section.name}"):
+        check_indices = [ci for ci, c in enumerate(section.checks) if c.kind == "check"]
+        st.button(
+            "✔ סמן הכל תקין",
+            key=f"{site_key}_s{si}_allok",
+            on_click=mark_section_ok,
+            args=(si, check_indices),
         )
 
-    if cat_val in st.session_state.image_paths:
-        st.caption(f"📷 תמונה צולמה: {st.session_state.image_paths[cat_val]}")
+        for ci, check in enumerate(section.checks):
+            if check.kind == "value":
+                suffix = " 🔒" if check.internal else ""
+                st.text_input(
+                    f"{check.description}{suffix}",
+                    key=f"{site_key}_s{si}_c{ci}_value",
+                    placeholder="הזן ערך...",
+                    help="🔒 = שדה פנימי, לא יופיע בדוח ללקוח" if check.internal else None,
+                )
+                continue
 
-    st.markdown("---")
+            col_label, col_status = st.columns([3, 2])
+            with col_label:
+                st.markdown(f"**{check.description}**")
+            with col_status:
+                status_choice = st.radio(
+                    label=f"סטטוס — {check.description}",
+                    options=UI_STATUSES,
+                    horizontal=True,
+                    label_visibility="collapsed",
+                    key=f"{site_key}_s{si}_c{ci}_status",
+                )
+
+            if status_choice in (Status.FAILED.value, Status.NOTE.value):
+                st.text_input(
+                    "הערה / פעולה שננקטה",
+                    key=f"{site_key}_s{si}_c{ci}_note",
+                    placeholder="פרט...",
+                )
+
+        # ── מצלמה לתיעוד ויזואלי של הסעיף ──
+        cam_key = f"{site_key}_s{si}"
+        btn_label = "סגור מצלמה 📷" if st.session_state.camera_open.get(cam_key) else "📷 צלם תיעוד"
+        st.button(
+            btn_label,
+            key=f"cam_btn_{cam_key}",
+            on_click=toggle_camera,
+            args=(cam_key,),
+        )
+        if st.session_state.camera_open.get(cam_key):
+            uploaded = st.camera_input(f"צלם תמונה — {section.name}", key=f"camera_{cam_key}")
+            if uploaded is not None:
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                img_name = f"{site_key}_{sanitize_filename_part(section.name)}_{ts}.jpg"
+                img_path = IMAGES_DIR / img_name
+                try:
+                    img_path.write_bytes(uploaded.getvalue())
+                    st.session_state.image_paths[cam_key] = str(img_path)
+                    st.success(f"תמונה נשמרה: {img_name}")
+                except PermissionError:
+                    st.error("אין הרשאה לשמור את התמונה. בדוק שהתיקייה data/images זמינה.")
+
+        if cam_key in st.session_state.image_paths:
+            st.caption(f"📷 תמונה צולמה: {st.session_state.image_paths[cam_key]}")
+
+st.markdown("---")
+
+general_comments = st.text_area("הערות כלליות", key=f"{site_key}_general_comments")
 
 submitted = st.button("💾 שמור דוח", use_container_width=True, type="primary")
 
 # ---------------------------------------------------------------------------
-# Camera inputs — rendered outside the form so callbacks work
-# ---------------------------------------------------------------------------
-
-st.markdown("## 📸 צילום תמונות לפי קטגוריה")
-st.caption("צלם תמונה לכל קטגוריה לפי הצורך. התמונות נשמרות אוטומטית.")
-
-for category in Category:
-    cat_val = category.value
-    col_title, col_btn = st.columns([4, 1])
-    with col_title:
-        st.markdown(f"**{cat_val}**")
-    with col_btn:
-        btn_label = "סגור 📷" if st.session_state.camera_open[cat_val] else "📷"
-        st.button(
-            btn_label,
-            key=f"cam_btn_{cat_val}",
-            on_click=toggle_camera,
-            args=(cat_val,),
-            use_container_width=True,
-        )
-
-    if st.session_state.camera_open[cat_val]:
-        uploaded = st.camera_input(
-            f"צלם תמונה — {cat_val}",
-            key=f"camera_{cat_val}",
-        )
-        if uploaded is not None:
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            safe_cat = cat_val.replace(" ", "_")
-            img_path = IMAGES_DIR / f"{safe_cat}_{ts}.jpg"
-            img_path.write_bytes(uploaded.getvalue())
-            st.session_state.image_paths[cat_val] = str(img_path)
-            st.success(f"תמונה נשמרה: {img_path.name}")
-
-st.markdown("---")
-
-# ---------------------------------------------------------------------------
-# Save handler — runs only on "שמור דוח" click, saves exactly once
+# שמירה: CSV + שני דוחות PDF
 # ---------------------------------------------------------------------------
 
 if submitted:
-    if not hospital or hospital == "אחר...":
-        st.error("נא לבחור או להזין שם בית חולים.")
-    elif not machine_id or machine_id == "אחר...":
-        st.error("נא לבחור או להזין מזהה מכשיר.")
+    if not site_name or not site_name.strip():
+        st.error("נא לבחור או להזין שם אתר.")
+    elif not machine_id.strip():
+        st.error("נא להזין מזהה מכונה / תא.")
     elif not technician.strip():
         st.error("נא להזין שם טכנאי.")
     else:
         try:
+            # בניית עץ התוצאות מתוך מצב הווידג'טים
+            sections_result: list[SectionResult] = []
+            for si, section in enumerate(template.sections):
+                checks_result: list[CheckResult] = []
+                for ci, check in enumerate(section.checks):
+                    if check.kind == "value":
+                        checks_result.append(CheckResult(
+                            description=check.description,
+                            kind="value",
+                            internal=check.internal,
+                            value=st.session_state.get(f"{site_key}_s{si}_c{ci}_value", "").strip(),
+                        ))
+                    else:
+                        status_val = st.session_state.get(
+                            f"{site_key}_s{si}_c{ci}_status", Status.OK.value
+                        )
+                        note_val = ""
+                        if status_val in (Status.FAILED.value, Status.NOTE.value):
+                            note_val = st.session_state.get(
+                                f"{site_key}_s{si}_c{ci}_note", ""
+                            ).strip()
+                        checks_result.append(CheckResult(
+                            description=check.description,
+                            kind="check",
+                            internal=check.internal,
+                            status=Status(status_val),
+                            note=note_val,
+                        ))
+                sections_result.append(SectionResult(name=section.name, checks=checks_result))
+
+            report_ts = datetime.combine(report_date, datetime.now().time())
             report = MaintenanceReport(
                 technician=technician.strip(),
-                hospital=hospital.strip(),
+                site=site_name.strip(),
                 machine_id=machine_id.strip(),
-                items=st.session_state.checklist_items,
-                image_paths=st.session_state.image_paths,
+                quarter=quarter.strip(),
+                timestamp=report_ts,
+                sections=sections_result,
+                image_paths={
+                    k: v for k, v in st.session_state.image_paths.items()
+                    if k.startswith(site_key)
+                },
+                general_comments=general_comments.strip(),
             )
 
-            # Generate base filename once per session so repeated saves
-            # overwrite the same files instead of creating new ones.
-            if st.session_state.report_filename is None:
-                st.session_state.report_filename = generate_filename(report)
-            base = st.session_state.report_filename
+            # שם הקובץ נגזר מנתוני הדוח הנוכחיים בכל שמירה (תיקון באג v1)
+            base = generate_filename(report)
 
-            # Save CSV to disk (data record)
-            df = report_to_dataframe(report)
+            csv_bytes = report_to_dataframe(report).to_csv(
+                index=False, encoding="utf-8-sig"
+            ).encode("utf-8-sig")
             try:
-                df.to_csv(REPORTS_DIR / f"{base}.csv", encoding="utf-8-sig", index=False)
+                (REPORTS_DIR / f"{base}.csv").write_bytes(csv_bytes)
             except PermissionError:
-                st.warning("קובץ ה-CSV פתוח בתוכנה אחרת (Excel?). סגור אותו ושמור שוב כדי לעדכן אותו. ה-PDF זמין להורדה.")
+                st.warning("קובץ ה-CSV פתוח בתוכנה אחרת (Excel?). ההורדה עדיין זמינה למטה.")
 
-            # Generate PDF bytes and store in session state for download
-            pdf_bytes = generate_pdf_bytes(report)
-            st.session_state.saved_report = (pdf_bytes, f"{base}.pdf")
+            pdf_internal = generate_pdf_bytes(report, include_internal=True)
+            pdf_customer = generate_pdf_bytes(report, include_internal=False)
 
-            failed = sum(1 for i in report.items if i.status == Status.FAILED)
-            ok     = sum(1 for i in report.items if i.status == Status.OK)
-            col1, col2 = st.columns(2)
-            col1.metric("תקין ✅", ok)
-            col2.metric("לא תקין ❌", failed)
+            st.session_state.saved_outputs = {
+                "base": base,
+                "csv": csv_bytes,
+                "pdf_internal": pdf_internal,
+                "pdf_customer": pdf_customer,
+            }
 
         except ValidationError as e:
-            st.error(f"שגיאת אימות:\n{e}")
+            st.error(f"שגיאת אימות נתונים:\n{e}")
         except Exception as e:
             st.error(f"שגיאה בלתי צפויה: {e}")
 
-# Download button shown persistently after any successful save;
-# clicking it does NOT re-run the save block above.
-if st.session_state.saved_report is not None:
-    pdf_bytes, pdf_filename = st.session_state.saved_report
-    st.success(f"✅ הדוח נשמר בהצלחה! קובץ: `{pdf_filename}`")
+# כפתורי הורדה — נשארים זמינים אחרי השמירה
+if st.session_state.saved_outputs:
+    out = st.session_state.saved_outputs
+    st.success(f"✅ הדוח נשמר בהצלחה! קובץ: `{out['base']}`")
+
+    col_int, col_cust = st.columns(2)
+    with col_int:
+        st.download_button(
+            "📄 הורד דוח פנימי (מלא)",
+            data=out["pdf_internal"],
+            file_name=f"{out['base']}_פנימי.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+        )
+    with col_cust:
+        st.download_button(
+            "📄 הורד דוח ללקוח",
+            data=out["pdf_customer"],
+            file_name=f"{out['base']}_לקוח.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+        )
     st.download_button(
-        label="⬇️ הורד דוח PDF",
-        data=pdf_bytes,
-        file_name=pdf_filename,
-        mime="application/pdf",
+        "📊 הורד נתונים (CSV)",
+        data=out["csv"],
+        file_name=f"{out['base']}.csv",
+        mime="text/csv",
         use_container_width=True,
     )

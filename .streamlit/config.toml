@@ -1,0 +1,21 @@
+# הגדרות שרת Streamlit — אבטחה ופרטיות
+
+[server]
+# השרת מאזין רק למחשב המקומי — האפליקציה לא חשופה לרשת (WiFi/LAN)
+address = "localhost"
+port = 8501
+# הגנת XSRF פעילה (ברירת מחדל, מצוין כאן במפורש)
+enableXsrfProtection = true
+# הגבלת גודל העלאות (תמונות מצלמה) ל-20MB
+maxUploadSize = 20
+
+[browser]
+# לא לשלוח סטטיסטיקות שימוש החוצה
+gatherUsageStats = false
+
+[theme]
+base = "light"
+primaryColor = "#4A4F6E"
+backgroundColor = "#F5F0E6"
+secondaryBackgroundColor = "#EDE8D5"
+textColor = "#000000"
